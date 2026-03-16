@@ -69,12 +69,169 @@ export class SocketService {
               isOnline: true,
               lastSeen: new Date(),
             });
+
+            // --- RECONNECT LOGIC FOR CALLS ---
+            const { default: CallModel } = await import("../models/Call.model.js");
+            const activeCall = await CallModel.findOne({
+              $or: [{ callerId: userId }, { receiverId: userId }],
+              status: "ACCEPTED",
+            }).populate("callerId receiverId", "name profileImage");
+
+            if (activeCall) {
+              console.log(`🔄 [SocketService] Re-syncing active call ${activeCall.callId} for user ${userId}`);
+              socket.emit("call:active_session", activeCall);
+            }
           } catch (err) {
             console.error("Error updating user online status:", err);
           }
         }
         socket.join(userId);
       }
+
+      // --- AGORA CALLING SIGNALING ---
+
+      // 1. Call Request
+      socket.on("call:request", async (data: { 
+        receiverId: string, 
+        type: "audio" | "video" 
+      }) => {
+        const { receiverId, type } = data;
+        const callId = Math.random().toString(36).substring(2, 10);
+        const channelName = `call_${callId}`;
+
+        try {
+          const { default: CallModel } = await import("../models/Call.model.js");
+          const { User } = await import("../models/user.model.js");
+          
+          const caller = await User.findById(userId).select("name profileImage");
+          const receiver = await User.findById(receiverId);
+
+          // Create Call Session in DB
+          const newCall = await CallModel.create({
+            callId,
+            channelName,
+            callerId: userId,
+            receiverId,
+            type,
+            status: "REQUESTED"
+          });
+
+          const callPayload = {
+            callId,
+            channelName,
+            caller: {
+              id: userId,
+              name: caller?.name || "Someone",
+              profileImage: caller?.profileImage
+            },
+            type
+          };
+
+          // Try Socket first
+          const isReceiverOnline = this.isUserOnline(receiverId);
+          if (isReceiverOnline) {
+            console.log(`📞 [SocketService] Sending call:incoming to ${receiverId}`);
+            this.io.to(receiverId).emit("call:incoming", callPayload);
+          } 
+          
+          // ALWAYS send high-priority FCM (Fallback or for background wake-up)
+          const { NotificationService } = await import("./notification.service.js");
+          await NotificationService.sendNotification(
+            receiverId,
+            `Incoming ${type} call`,
+            `${caller?.name || 'Someone'} is calling you...`,
+            {
+              type: "CALL_INCOMING",
+              callId,
+              channelName,
+              callerId: userId,
+              callerName: caller?.name || "",
+              callerImage: caller?.profileImage || "",
+              callType: type
+            }
+          );
+
+          // Confirm to caller
+          socket.emit("call:request_sent", { callId });
+
+          // Auto-timeout after 35 seconds if no response
+          setTimeout(async () => {
+            const currentCall = await CallModel.findOne({ callId });
+            if (currentCall && (currentCall.status === "REQUESTED" || currentCall.status === "RINGING")) {
+              await CallModel.findOneAndUpdate({ callId }, { status: "MISSED" });
+              this.io.to(userId).to(receiverId).emit("call:ended", { callId, reason: "MISSED" });
+            }
+          }, 35000);
+
+        } catch (err) {
+          console.error("Call Request Error:", err);
+        }
+      });
+
+      // 2. Call Ringing (Receiver app is open and ringing)
+      socket.on("call:ringing", async (data: { callId: string, callerId: string }) => {
+        const { callId, callerId } = data;
+        await (await import("../models/Call.model.js")).default.findOneAndUpdate(
+          { callId }, { status: "RINGING" }
+        );
+        this.io.to(callerId).emit("call:ringing", { callId });
+      });
+
+      // 3. Call Accept
+      socket.on("call:accept", async (data: { callId: string, callerId: string }) => {
+        const { callId, callerId } = data;
+        try {
+          const { default: CallModel } = await import("../models/Call.model.js");
+          await CallModel.findOneAndUpdate(
+            { callId }, 
+            { status: "ACCEPTED", startTime: new Date() }
+          );
+          console.log(`✅ [SocketService] Call ${callId} ACCEPTED`);
+          this.io.to(callerId).emit("call:accepted", { callId });
+        } catch (err) {
+          console.error("Call Accept Error:", err);
+        }
+      });
+
+      // 4. Call Decline
+      socket.on("call:decline", async (data: { callId: string, callerId: string }) => {
+        const { callId, callerId } = data;
+        await (await import("../models/Call.model.js")).default.findOneAndUpdate(
+          { callId }, { status: "DECLINED" }
+        );
+        this.io.to(callerId).emit("call:declined", { callId });
+      });
+
+      // 5. Call Cancel (By Caller before acceptance)
+      socket.on("call:cancel", async (data: { callId: string, receiverId: string }) => {
+        const { callId, receiverId } = data;
+        await (await import("../models/Call.model.js")).default.findOneAndUpdate(
+          { callId }, { status: "CANCELLED" }
+        );
+        this.io.to(receiverId).emit("call:cancelled", { callId });
+      });
+
+      // 6. Call End (Active call terminated)
+      socket.on("call:end", async (data: { callId: string, otherUserId: string }) => {
+        const { callId, otherUserId } = data;
+        try {
+          const { default: CallModel } = await import("../models/Call.model.js");
+          const call = await CallModel.findOne({ callId });
+          if (call && call.startTime) {
+            const endTime = new Date();
+            const duration = Math.floor((endTime.getTime() - call.startTime.getTime()) / 1000);
+            await CallModel.findOneAndUpdate(
+              { callId }, 
+              { status: "ENDED", endTime, duration }
+            );
+          } else {
+            await CallModel.findOneAndUpdate({ callId }, { status: "ENDED" });
+          }
+          this.io.to(otherUserId).emit("call:ended", { callId });
+        } catch (err) {
+          console.error("Call End Error:", err);
+        }
+      });
 
       // Handle Premium Real-time Messaging
       socket.on(

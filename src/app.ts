@@ -4,6 +4,7 @@ import cors from "cors";
 import { AuthRoutes } from "./routes/auth.routes.js";
 import { UserRoutes } from "./routes/user.routes.js";
 import { ChatRoutes } from "./routes/chat.routes.js";
+import { CallRoutes } from "./routes/call.routes.js";
 
 const app: Application = express();
 
@@ -16,6 +17,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/v1/auth", AuthRoutes);
 app.use("/api/v1/users", UserRoutes);
 app.use("/api/v1/chats", ChatRoutes);
+app.use("/api/v1/call", CallRoutes);
 
 // Health Check
 app.get("/", (req: Request, res: Response) => {
