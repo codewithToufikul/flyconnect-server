@@ -19,8 +19,8 @@ async function main() {
     await mongoose.connect(dbUri);
     console.log("✅ Connected to MongoDB (flybook) Using Mongoose!!");
 
-    server = app.listen(PORT, () => {
-      console.log(`🚀 FlyConnect Server is listening on port ${PORT}`);
+    server = app.listen(Number(PORT), "0.0.0.0", () => {
+      console.log(`🚀 FlyConnect Server is listening on 0.0.0.0:${PORT}`);
       // Initialize Socket.io
       SocketService.init(server);
     });

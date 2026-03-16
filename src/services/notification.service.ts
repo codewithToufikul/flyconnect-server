@@ -6,12 +6,10 @@ export class NotificationService {
 
   static init() {
     try {
-      // Look for service account in environment or a specific file path
-      // For now, we assume it's set in the environment or we provide a placeholder
       if (process.env.FIREBASE_SERVICE_ACCOUNT) {
         let serviceAccountValue = process.env.FIREBASE_SERVICE_ACCOUNT;
 
-        // Check if it's base64 (doesn't start with '{')
+        // Support both raw JSON and base64-encoded
         if (!serviceAccountValue.trim().startsWith("{")) {
           serviceAccountValue = Buffer.from(
             serviceAccountValue,
@@ -35,36 +33,131 @@ export class NotificationService {
     }
   }
 
+  /**
+   * Build a smart, human-readable notification body depending on content type.
+   */
+  private static buildNotificationBody(
+    content: string,
+    contentType: string,
+  ): string {
+    switch (contentType) {
+      case "image":
+        return "📷 Photo পাঠিয়েছে";
+      case "video":
+        return "🎥 Video পাঠিয়েছে";
+      case "audio":
+        return "🎵 Voice message পাঠিয়েছে";
+      case "file":
+        return "📎 File পাঠিয়েছে";
+      case "text":
+      default:
+        return content.length > 80
+          ? content.substring(0, 80) + "..."
+          : content;
+    }
+  }
+
+  /**
+   * Send a push notification to a user.
+   * @param userId - Recipient's MongoDB userId
+   * @param title - Notification title (usually sender's name)
+   * @param content - Raw message content
+   * @param contentType - 'text' | 'image' | 'video' | 'audio' | 'file'
+   * @param data - Extra data payload for navigation (conversationId, senderId etc.)
+   */
   static async sendNotification(
     userId: string,
     title: string,
-    body: string,
-    data?: any,
+    content: string,
+    data?: Record<string, string>,
+    contentType: string = "text",
   ) {
     if (!this.isInitialized) return;
 
     try {
       const user = await User.findById(userId);
-      if (!user || !user.fcmTokens || user.fcmTokens.length === 0) return;
+      console.log(`🔍 [NotificationService] Looking up tokens for user ${userId}...`);
+      
+      if (!user) {
+        console.error(`❌ [NotificationService] User ${userId} not found in database.`);
+        return;
+      }
+      
+      if (!user.fcmTokens || user.fcmTokens.length === 0) {
+        console.warn(`⚠️ [NotificationService] User ${user.name} (${userId}) has 0 registered FCM tokens.`);
+        return;
+      }
 
-      const message = {
-        notification: { title, body },
-        data: data || {},
+      console.log(`📱 [NotificationService] Found ${user.fcmTokens.length} tokens for user ${user.name}.`);
+
+      const body = this.buildNotificationBody(content, contentType);
+
+      // All values in the data object MUST be strings for FCM
+      const dataPayload: Record<string, string> = {
+        type: "CHAT_MESSAGE",
+        contentType,
+        ...(data || {}),
+      };
+
+      const message: admin.messaging.MulticastMessage = {
+        notification: {
+          title,
+          body,
+        },
+        data: dataPayload,
+        android: {
+          priority: "high",
+          notification: {
+            channelId: "chat_messages",
+            sound: "default",
+            priority: "high",
+            defaultSound: true,
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: "default",
+              badge: 1,
+              contentAvailable: true,
+            },
+          },
+          headers: {
+            "apns-priority": "10",
+          },
+        },
         tokens: user.fcmTokens,
       };
 
+      console.log(`🚀 [NotificationService] Sending FCM multicast to user ${userId}...`);
       const response = await admin.messaging().sendEachForMulticast(message);
       console.log(
-        `Successfully sent ${response.successCount} notifications to user ${userId}`,
+        `✅ [NotificationService] Multicast result for ${userId}: ${response.successCount} success, ${response.failureCount} failed`,
       );
 
-      // Cleanup invalid tokens if any
+      if (response.failureCount > 0) {
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            console.error(`❌ [NotificationService] Token ${idx} failed:`, resp.error?.message);
+          }
+        });
+      }
+
+      // Cleanup stale/invalid tokens automatically
       if (response.failureCount > 0) {
         const failedTokens: string[] = [];
         response.responses.forEach((resp, idx) => {
           if (!resp.success && user.fcmTokens) {
             const token = user.fcmTokens[idx];
-            if (token) failedTokens.push(token);
+            const errorCode = resp.error?.code;
+            // Only remove truly invalid tokens, not transient errors
+            if (
+              token &&
+              (errorCode === "messaging/invalid-registration-token" ||
+                errorCode === "messaging/registration-token-not-registered")
+            ) {
+              failedTokens.push(token);
+            }
           }
         });
 
@@ -72,6 +165,9 @@ export class NotificationService {
           await User.findByIdAndUpdate(userId as string, {
             $pull: { fcmTokens: { $in: failedTokens } },
           });
+          console.log(
+            `🧹 Removed ${failedTokens.length} stale FCM tokens for user ${userId}`,
+          );
         }
       }
     } catch (error) {
@@ -81,10 +177,10 @@ export class NotificationService {
 
   static async registerToken(userId: string, token: string) {
     try {
-      // Use $addToSet to avoid duplicates
       await User.findByIdAndUpdate(userId, {
         $addToSet: { fcmTokens: token },
       });
+      console.log(`📡 [NotificationService] Registered/Updated FCM token for user ${userId}`);
       return true;
     } catch (error) {
       console.error("Error registering FCM token:", error);

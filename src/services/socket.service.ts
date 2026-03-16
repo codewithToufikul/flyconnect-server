@@ -154,20 +154,33 @@ export class SocketService {
 
             // 4. Send Push Notification via FCM
             const isOnline = this.isUserOnline(receiverId);
-            if (!isOnline) {
+            console.log(`📡 [SocketService] Receiver ${receiverId} status: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+            
+            // To debug, we send notification even if online, 
+            // the app should handle not showing it if appropriate.
+            console.log(`🔔 [SocketService] Triggering push notification attempt for ${receiverId}...`);
+            
+            try {
               const { NotificationService } =
                 await import("./notification.service.js");
               const { User } = await import("../models/user.model.js");
-              const sender = await User.findById(userId).select("name");
+              const sender = await User.findById(userId).select("name profileImage");
 
               await NotificationService.sendNotification(
                 receiverId,
                 sender?.name || "New Message",
-                content.length > 50
-                  ? content.substring(0, 50) + "..."
-                  : content,
-                { conversationId, type: "CHAT_MESSAGE" },
+                content,
+                {
+                  conversationId,
+                  type: "CHAT_MESSAGE",
+                  senderId: userId,
+                  senderName: sender?.name || "",
+                  senderImage: (sender as any)?.profileImage || "",
+                },
+                contentType,
               );
+            } catch (notifyError) {
+              console.error(`❌ [SocketService] Notification Error:`, notifyError);
             }
           } catch (error) {
             console.error("Error processing send_message:", error);
@@ -303,7 +316,7 @@ export class SocketService {
               );
 
               if (existingUserReactionIndex > -1) {
-                const oldEmoji = reactions[existingUserReactionIndex].emoji;
+                const oldEmoji = reactions[existingUserReactionIndex]?.emoji;
                 // remove existing
                 reactions.splice(existingUserReactionIndex, 1);
 
