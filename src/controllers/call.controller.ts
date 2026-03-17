@@ -9,7 +9,7 @@ export class CallController {
    */
   static async generateToken(req: Request, res: Response) {
     try {
-      const { channelName, callId } = req.body;
+      const { channelName, callId, uid } = req.body;
       const userId = (req as any).user?.id;
 
       if (!channelName || !callId) {
@@ -32,8 +32,9 @@ export class CallController {
         });
       }
 
-      // 0 for auto-assign UID by Agora, can be replaced with specific integer UID if needed
-      const token = AgoraService.generateToken(channelName, 0);
+      // Use specific integer UID if provided, else fall back to 0 (auto)
+      const numericUid = uid ? parseInt(uid) : 0;
+      const token = AgoraService.generateToken(channelName, numericUid);
 
       if (!token) {
         return res.status(500).json({
