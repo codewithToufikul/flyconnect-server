@@ -17,7 +17,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/v1/auth", AuthRoutes);
 app.use("/api/v1/users", UserRoutes);
 app.use("/api/v1/chats", ChatRoutes);
-app.use("/api/v1/call", CallRoutes);
+app.use("/api/v1/calls", CallRoutes);
 
 // Health Check
 app.get("/", (req: Request, res: Response) => {

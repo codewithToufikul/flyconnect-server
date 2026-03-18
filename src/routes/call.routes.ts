@@ -6,5 +6,6 @@ const router = Router();
 
 router.post("/generate-token", authMiddleware, CallController.generateToken);
 router.get("/history", authMiddleware, CallController.getCallHistory);
+router.post("/decline", authMiddleware, CallController.declineCall);
 
 export const CallRoutes = router;

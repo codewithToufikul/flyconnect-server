@@ -79,4 +79,35 @@ export class CallController {
       });
     }
   }
+
+  /**
+   * Decline an incoming call via API (background support)
+   */
+  static async declineCall(req: Request, res: Response) {
+    try {
+      const { callId, callerId } = req.body;
+      const userId = (req as any).user?.id;
+
+      if (!callId || !callerId) {
+        return res.status(400).json({ success: false, message: "callId and callerId are required" });
+      }
+
+      await (await import("../models/Call.model.js")).default.findOneAndUpdate(
+        { callId }, { status: "DECLINED" }
+      );
+
+      // Notify caller via Socket.IO
+      const { SocketService } = await import("../services/socket.service.js");
+      const io = SocketService.getIO();
+      if (io) {
+        console.log(`🛑 [CallController] Sending call:declined for ${callId} to caller ${callerId}`);
+        io.to(callerId).emit("call:declined", { callId });
+      }
+
+      return res.status(200).json({ success: true, message: "Call declined" });
+    } catch (error) {
+      console.error("Decline API Error:", error);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  }
 }

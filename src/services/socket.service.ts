@@ -134,19 +134,17 @@ export class SocketService {
             this.io.to(receiverId).emit("call:incoming", callPayload);
           } 
           
-          // ALWAYS send high-priority FCM (Fallback or for background wake-up)
+          // ALWAYS send high-priority FCM (Data-only to avoid duplicate system banners)
           const { NotificationService } = await import("./notification.service.js");
-          await NotificationService.sendNotification(
+          await NotificationService.sendDataOnlyNotification(
             receiverId,
-            `Incoming ${type} call`,
-            `${caller?.name || 'Someone'} is calling you...`,
             {
               type: "CALL_INCOMING",
               callId,
               channelName,
               callerId: userId,
-              callerName: caller?.name || "",
-              callerImage: caller?.profileImage || "",
+              callerName: caller?.name || "Someone",
+              callerImage: (caller as any)?.profileImage || "",
               callType: type
             }
           );
@@ -209,6 +207,16 @@ export class SocketService {
           { callId }, { status: "CANCELLED" }
         );
         this.io.to(receiverId).emit("call:cancelled", { callId });
+
+        // Send FCM to cancel notification on receiver's device (Killed/Background)
+        const { NotificationService } = await import("./notification.service.js");
+        await NotificationService.sendDataOnlyNotification(
+          receiverId,
+          {
+            type: "CALL_CANCELLED",
+            callId
+          }
+        );
       });
 
       // 6. Call End (Active call terminated)
@@ -228,6 +236,16 @@ export class SocketService {
             await CallModel.findOneAndUpdate({ callId }, { status: "ENDED" });
           }
           this.io.to(otherUserId).emit("call:ended", { callId });
+
+          // Send FCM to cancel notification on other party's device
+          const { NotificationService } = await import("./notification.service.js");
+          await NotificationService.sendDataOnlyNotification(
+            otherUserId,
+            {
+              type: "CALL_ENDED",
+              callId
+            }
+          );
         } catch (err) {
           console.error("Call End Error:", err);
         }

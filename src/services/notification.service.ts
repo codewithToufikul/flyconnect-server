@@ -175,6 +175,51 @@ export class NotificationService {
     }
   }
 
+  /**
+   * Send a data-only FCM message (silent/hidden).
+   * Useful for calls, remote config sync, or when the app handles UI manually.
+   */
+  static async sendDataOnlyNotification(
+    userId: string,
+    data: Record<string, string>,
+  ) {
+    if (!this.isInitialized) return;
+
+    try {
+      const user = await User.findById(userId);
+      if (!user || !user.fcmTokens || user.fcmTokens.length === 0) return;
+
+      console.log(`📡 [NotificationService] Sending DATA-ONLY multicast to ${user.name}...`);
+
+      const message: admin.messaging.MulticastMessage = {
+        data,
+        android: {
+          priority: "high", // Critical for wake-up
+        },
+        apns: {
+          payload: {
+            aps: {
+              contentAvailable: true, // Required for background wake-up on iOS
+            },
+          },
+          headers: {
+            "apns-priority": "5", // High priority for data-only
+            "apns-push-type": "background"
+          },
+        },
+        tokens: user.fcmTokens,
+      };
+
+      const response = await admin.messaging().sendEachForMulticast(message);
+      console.log(`✅ [NotificationService] Data-only result: ${response.successCount} success.`);
+      
+      // Optional: Add token cleanup here too if needed, 
+      // but sendNotification already handles it for the same tokens.
+    } catch (error) {
+      console.error("❌ Data-only notification error:", error);
+    }
+  }
+
   static async registerToken(userId: string, token: string) {
     try {
       await User.findByIdAndUpdate(userId, {
