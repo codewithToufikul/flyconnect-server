@@ -6,6 +6,7 @@ const router = Router();
 
 router.post("/login", AuthController.login);
 router.get("/profile", authMiddleware, AuthController.getProfile);
+router.post("/login-with-flybook", AuthController.loginWithFlyBook);
 router.post(
   "/register-fcm-token",
   authMiddleware,

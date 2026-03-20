@@ -28,6 +28,12 @@ router.get(
 
       const searchQuery = q.trim();
       const currentUserId = req.user?.id;
+      if (!currentUserId) {
+        return res.status(401).json({
+          success: false,
+          message: "Unauthorized",
+        });
+      }
 
       const query: any = {
         $and: [
@@ -69,7 +75,7 @@ router.get("/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!id || typeof id !== "string" || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid user ID",

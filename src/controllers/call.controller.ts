@@ -60,17 +60,31 @@ export class CallController {
   static async getCallHistory(req: Request, res: Response) {
     try {
       const userId = (req as any).user?.id;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const skip = (page - 1) * limit;
+
       const history = await Call.find({
         $or: [{ callerId: userId }, { receiverId: userId }],
       })
-        .populate("callerId", "name profileImage")
-        .populate("receiverId", "name profileImage")
+        .populate("callerId", "name profileImage isOnline lastSeen")
+        .populate("receiverId", "name profileImage isOnline lastSeen")
         .sort({ createdAt: -1 })
-        .limit(20);
+        .skip(skip)
+        .limit(limit);
+
+      const total = await Call.countDocuments({
+        $or: [{ callerId: userId }, { receiverId: userId }],
+      });
 
       return res.status(200).json({
         success: true,
         history,
+        pagination: {
+          total,
+          page,
+          pages: Math.ceil(total / limit),
+        },
       });
     } catch (error: any) {
       return res.status(500).json({

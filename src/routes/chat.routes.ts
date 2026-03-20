@@ -120,11 +120,16 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.user?.id;
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
 
       const conversations = await Conversation.find({
-        participants: userId,
+        participants: userId as any,
       })
-        .sort({ updatedAt: -1 })
+        .sort({ lastMessageAt: -1 })
         .populate(
           "participants",
           "name userName profileImage isOnline lastSeen",
@@ -137,6 +142,68 @@ router.get(
       });
     } catch (error) {
       console.error("Fetch inbox error:", error);
+      res
+        .status(500)
+        .json({ success: false, message: "Internal server error" });
+    }
+  },
+);
+
+/**
+ * @route   POST /api/v1/chats/mute/:conversationId
+ * @desc    Mute or unmute a conversation for the current user
+ * @access  Private
+ */
+router.post(
+  "/mute/:conversationId",
+  authMiddleware,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+
+      const conversation = await Conversation.findById(conversationId);
+      if (!conversation) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Conversation not found" });
+      }
+
+      // Check if already muted
+      const isMuted = conversation.mutedBy.some(
+        (id: any) => id.toString() === userId.toString(),
+      );
+
+      if (isMuted) {
+        // Unmute: Remove user from mutedBy array
+        await Conversation.findByIdAndUpdate(conversationId, {
+          $pull: { mutedBy: userId },
+        });
+      } else {
+        // Mute: Add user to mutedBy array
+        await Conversation.findByIdAndUpdate(conversationId, {
+          $addToSet: { mutedBy: userId },
+        });
+      }
+
+      const updated = await Conversation.findById(conversationId).populate(
+        "participants",
+        "name userName profileImage isOnline lastSeen",
+      );
+
+      res.status(200).json({
+        success: true,
+        message: isMuted ? "Conversation unmuted" : "Conversation muted",
+        data: updated,
+      });
+    } catch (error) {
+      console.error("Mute conversation error:", error);
       res
         .status(500)
         .json({ success: false, message: "Internal server error" });

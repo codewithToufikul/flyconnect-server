@@ -195,6 +195,7 @@ export class NotificationService {
         data,
         android: {
           priority: "high", // Critical for wake-up
+          ttl: 30 * 1000,   // 30 seconds (FCM TTL is in MS)
         },
         apns: {
           payload: {
@@ -204,7 +205,8 @@ export class NotificationService {
           },
           headers: {
             "apns-priority": "5", // High priority for data-only
-            "apns-push-type": "background"
+            "apns-push-type": "background",
+            "apns-expiration": Math.floor(Date.now() / 1000 + 30).toString(), // Expires in 30 seconds
           },
         },
         tokens: user.fcmTokens,
