@@ -201,12 +201,18 @@ export class NotificationService {
           payload: {
             aps: {
               contentAvailable: true, // Required for background wake-up on iOS
+              mutableContent: true,
+              sound: "ringtone", 
+              alert: {
+                title: data.callerName || "Incoming Call",
+                body: `Incoming ${data.callType || "audio"} call...`,
+              },
             },
           },
           headers: {
-            "apns-priority": "5", // High priority for data-only
-            "apns-push-type": "background",
-            "apns-expiration": Math.floor(Date.now() / 1000 + 30).toString(), // Expires in 30 seconds
+            "apns-priority": "10", // High priority for calls
+            "apns-push-type": "alert",
+            "apns-expiration": Math.floor(Date.now() / 1000 + 45).toString(), // Expires in 45 seconds (call timeout)
           },
         },
         tokens: user.fcmTokens,
