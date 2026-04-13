@@ -176,8 +176,19 @@ export class NotificationService {
   }
 
   /**
-   * Send a data-only FCM message (silent/hidden).
-   * Useful for calls, remote config sync, or when the app handles UI manually.
+   * Send a platform-optimized call notification.
+   *
+   * Android strategy → Data-only (high-priority wakeup):
+   *   The app's index.js backgroundHandler catches it and shows a
+   *   Notifee full-screen / heads-up call notification.
+   *
+   * iOS strategy → Alert notification + data payload:
+   *   iOS will NOT reliably wake a *killed* app from a data-only push.
+   *   Only APNs VoIP (PushKit) guarantees a wakeup, but that requires a
+   *   separate certificate.  The next best thing is a high-priority *alert*
+   *   push: iOS delivers it reliably, shows a banner, and the user taps it.
+   *   App.tsx > getInitialNotification() then reads the data and restores
+   *   the call session via AsyncStorage → CallContext.
    */
   static async sendDataOnlyNotification(
     userId: string,
@@ -189,42 +200,83 @@ export class NotificationService {
       const user = await User.findById(userId);
       if (!user || !user.fcmTokens || user.fcmTokens.length === 0) return;
 
-      console.log(`📡 [NotificationService] Sending DATA-ONLY multicast to ${user.name}...`);
+      const isCallNotification = data.type === "CALL_INCOMING" || data.type === "CALL_CANCELLED" || data.type === "CALL_ENDED";
+      const isIncomingCall    = data.type === "CALL_INCOMING";
 
-      const message: admin.messaging.MulticastMessage = {
+      console.log(`📡 [NotificationService] Sending call notification to ${user.name} (tokens: ${user.fcmTokens.length})...`);
+
+      // ── Android: Data-only → backgroundHandler → Notifee custom UI ─────────
+      const androidMessage: admin.messaging.MulticastMessage = {
         data,
         android: {
-          priority: "high", // Critical for wake-up
-          ttl: 30 * 1000,   // 30 seconds (FCM TTL is in MS)
+          priority: "high",
+          ttl: 45 * 1000, // 45 s matches client-side ghost-call window
+          collapseKey: isCallNotification ? `call_${data.callId}` : undefined,
         },
+        tokens: user.fcmTokens,
+      };
+
+      // ── iOS: Alert notification + data → system-guaranteed delivery ─────────
+      // apns-push-type MUST be "alert" for normal APNs delivery.
+      // Do NOT mix contentAvailable=true with alert on a data-only message;
+      // that can cause iOS to silently drop or throttle the push.
+      const iosMessage: admin.messaging.MulticastMessage = {
+        data, // FCM still attaches data so backgroundHandler / getInitialNotification can read it
+        notification: isIncomingCall
+          ? {
+              title: `📞 ${data.callerName || "Incoming Call"}`,
+              body: `Incoming ${data.callType || "audio"} call — tap to join`,
+            }
+          : undefined, // CALL_CANCELLED / CALL_ENDED → silent cancel; no banner needed
         apns: {
           payload: {
-            aps: {
-              contentAvailable: true, // Required for background wake-up on iOS
-              mutableContent: true,
-              sound: "ringtone", 
-              alert: {
-                title: data.callerName || "Incoming Call",
-                body: `Incoming ${data.callType || "audio"} call...`,
-              },
-            },
+            aps: isIncomingCall
+              ? {
+                  // 'alert' type — iOS delivers reliably even for killed apps
+                  alert: {
+                    title: `📞 ${data.callerName || "Incoming Call"}`,
+                    body:  `Incoming ${data.callType || "audio"} call — tap to join`,
+                  },
+                  sound: "default",
+                  badge: 0,
+                  // contentAvailable intentionally omitted:
+                  // mixing alert + content-available can cause silent drops.
+                }
+              : {
+                  // Silent cancel / end notification
+                  contentAvailable: true,
+                  sound: "" as any,
+                },
           },
           headers: {
-            "apns-priority": "10", // High priority for calls
-            "apns-push-type": "alert",
-            "apns-expiration": Math.floor(Date.now() / 1000 + 45).toString(), // Expires in 45 seconds (call timeout)
+            "apns-priority":   "10",    // max priority
+            "apns-push-type":  isIncomingCall ? "alert" : "background",
+            // Expires exactly when the server-side call auto-misses (35 s),
+            // so a stale wake-up is never shown.
+            "apns-expiration": Math.floor(Date.now() / 1000 + 35).toString(),
           },
         },
         tokens: user.fcmTokens,
       };
 
-      const response = await admin.messaging().sendEachForMulticast(message);
-      console.log(`✅ [NotificationService] Data-only result: ${response.successCount} success.`);
-      
-      // Optional: Add token cleanup here too if needed, 
-      // but sendNotification already handles it for the same tokens.
+      // Send both in parallel; failures on one platform do not block the other.
+      const [androidResult, iosResult] = await Promise.allSettled([
+        admin.messaging().sendEachForMulticast(androidMessage),
+        admin.messaging().sendEachForMulticast(iosMessage),
+      ]);
+
+      const aOk = androidResult.status === "fulfilled" ? androidResult.value.successCount : 0;
+      const iOk = iosResult.status    === "fulfilled" ? iosResult.value.successCount    : 0;
+      console.log(`✅ [NotificationService] Call push: Android ${aOk} ok | iOS ${iOk} ok`);
+
+      if (androidResult.status === "rejected") {
+        console.error("❌ [NotificationService] Android push error:", androidResult.reason);
+      }
+      if (iosResult.status === "rejected") {
+        console.error("❌ [NotificationService] iOS push error:", iosResult.reason);
+      }
     } catch (error) {
-      console.error("❌ Data-only notification error:", error);
+      console.error("❌ [NotificationService] sendDataOnlyNotification error:", error);
     }
   }
 
