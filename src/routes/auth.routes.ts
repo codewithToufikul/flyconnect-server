@@ -12,5 +12,11 @@ router.post(
   authMiddleware,
   AuthController.registerFCMToken,
 );
+// iOS PushKit VoIP token (used for guaranteed call delivery in background/killed state)
+router.post(
+  "/register-voip-token",
+  authMiddleware,
+  AuthController.registerVoipToken,
+);
 
 export const AuthRoutes = router;

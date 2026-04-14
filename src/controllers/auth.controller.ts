@@ -149,6 +149,39 @@ export class AuthController {
   }
 
   /**
+   * Register iOS PushKit VoIP token.
+   * Called by the app after react-native-voip-push-notification fires the 'register' event.
+   * This token is used to send guaranteed call notifications directly via APNs.
+   */
+  static async registerVoipToken(req: Request, res: Response) {
+    try {
+      const userId = (req as any).user?.id;
+      const { voipToken } = req.body;
+
+      if (!userId || !voipToken) {
+        return res.status(400).json({
+          success: false,
+          message: "voipToken is required",
+        });
+      }
+
+      const { VoIPService } = await import("../services/voip.service.js");
+      await VoIPService.registerToken(userId, voipToken);
+
+      return res.status(200).json({
+        success: true,
+        message: "VoIP token registered successfully",
+      });
+    } catch (error: any) {
+      console.error("Register VoIP token error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  /**
    * SSO Login with FlyBook
    *
    * Flow:

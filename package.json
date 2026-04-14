@@ -14,9 +14,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@types/apn": "^0.0.31",
     "@types/bcrypt": "^6.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "agora-access-token": "^2.0.4",
+    "apn": "^2.2.0",
     "axios": "^1.13.6",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",

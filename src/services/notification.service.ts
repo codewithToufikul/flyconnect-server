@@ -178,17 +178,21 @@ export class NotificationService {
   /**
    * Send a platform-optimized call notification.
    *
-   * Android strategy → Data-only (high-priority wakeup):
-   *   The app's index.js backgroundHandler catches it and shows a
-   *   Notifee full-screen / heads-up call notification.
+   * FCM routes platform-specific config automatically per token:
    *
-   * iOS strategy → Alert notification + data payload:
-   *   iOS will NOT reliably wake a *killed* app from a data-only push.
-   *   Only APNs VoIP (PushKit) guarantees a wakeup, but that requires a
-   *   separate certificate.  The next best thing is a high-priority *alert*
-   *   push: iOS delivers it reliably, shows a banner, and the user taps it.
-   *   App.tsx > getInitialNotification() then reads the data and restores
-   *   the call session via AsyncStorage → CallContext.
+   * Android (via `android` config block):
+   *   → Data-only, high-priority wakeup
+   *   → index.js backgroundHandler catches it → Notifee full-screen/heads-up UI
+   *
+   * iOS (via `apns` config block):
+   *   → contentAvailable:true  tries to wake the app in BACKGROUND
+   *     (index.js backgroundHandler → RNCallKeep.displayIncomingCall native UI)
+   *   → aps.alert shows a BANNER when the app is KILLED so the user can tap
+   *     (App.tsx getInitialNotification → AsyncStorage → CallContext restores session)
+   *   → apns-priority:10 + apns-push-type:voip-like setup for maximum delivery
+   *
+   * Note: Only one multicast is sent. FCM applies the correct config block
+   * per device platform, so Android tokens use `android` and iOS tokens use `apns`.
    */
   static async sendDataOnlyNotification(
     userId: string,
@@ -200,80 +204,68 @@ export class NotificationService {
       const user = await User.findById(userId);
       if (!user || !user.fcmTokens || user.fcmTokens.length === 0) return;
 
-      const isCallNotification = data.type === "CALL_INCOMING" || data.type === "CALL_CANCELLED" || data.type === "CALL_ENDED";
-      const isIncomingCall    = data.type === "CALL_INCOMING";
+      const isIncomingCall = data.type === "CALL_INCOMING";
 
-      console.log(`📡 [NotificationService] Sending call notification to ${user.name} (tokens: ${user.fcmTokens.length})...`);
+      console.log(`📡 [NotificationService] Sending call push to ${user.name} (${user.fcmTokens.length} token(s))...`);
 
-      // ── Android: Data-only → backgroundHandler → Notifee custom UI ─────────
-      const androidMessage: admin.messaging.MulticastMessage = {
+      const message: admin.messaging.MulticastMessage = {
+        // data payload is delivered to ALL platforms
         data,
+
+        // ── Android: data-only wake (no system banner; Notifee handles UI) ──
         android: {
           priority: "high",
-          ttl: 45 * 1000, // 45 s matches client-side ghost-call window
-          collapseKey: isCallNotification ? `call_${data.callId}` : undefined,
+          ttl: 45 * 1000,                                          // matches ghost-call window
+          collapseKey: data.callId ? `call_${data.callId}` : undefined,
         },
-        tokens: user.fcmTokens,
-      };
 
-      // ── iOS: Alert notification + data → system-guaranteed delivery ─────────
-      // apns-push-type MUST be "alert" for normal APNs delivery.
-      // Do NOT mix contentAvailable=true with alert on a data-only message;
-      // that can cause iOS to silently drop or throttle the push.
-      const iosMessage: admin.messaging.MulticastMessage = {
-        data, // FCM still attaches data so backgroundHandler / getInitialNotification can read it
-        notification: isIncomingCall
-          ? {
-              title: `📞 ${data.callerName || "Incoming Call"}`,
-              body: `Incoming ${data.callType || "audio"} call — tap to join`,
-            }
-          : undefined, // CALL_CANCELLED / CALL_ENDED → silent cancel; no banner needed
+        // ── iOS: contentAvailable (background handler) + alert (killed banner) ──
         apns: {
           payload: {
-            aps: isIncomingCall
-              ? {
-                  // 'alert' type — iOS delivers reliably even for killed apps
-                  alert: {
-                    title: `📞 ${data.callerName || "Incoming Call"}`,
-                    body:  `Incoming ${data.callType || "audio"} call — tap to join`,
-                  },
-                  sound: "default",
-                  badge: 0,
-                  // contentAvailable intentionally omitted:
-                  // mixing alert + content-available can cause silent drops.
-                }
-              : {
-                  // Silent cancel / end notification
-                  contentAvailable: true,
-                  sound: "" as any,
-                },
+            aps: {
+              // contentAvailable: true ensures the app is woken up in the background
+              // to handle the incoming call data without showing a standard banner.
+              // The VoIP push handles the actual CallKit UI.
+              contentAvailable: true,
+              sound: isIncomingCall ? "default" : undefined,
+              badge: 0,
+            },
           },
           headers: {
-            "apns-priority":   "10",    // max priority
-            "apns-push-type":  isIncomingCall ? "alert" : "background",
-            // Expires exactly when the server-side call auto-misses (35 s),
-            // so a stale wake-up is never shown.
+            "apns-priority": "10",          // highest priority
+            // alert type is required by Apple when aps.alert is present
+            "apns-push-type": isIncomingCall ? "alert" : "background",
+            // Expire when the server auto-misses the call (35 s)
             "apns-expiration": Math.floor(Date.now() / 1000 + 35).toString(),
           },
         },
+
         tokens: user.fcmTokens,
       };
 
-      // Send both in parallel; failures on one platform do not block the other.
-      const [androidResult, iosResult] = await Promise.allSettled([
-        admin.messaging().sendEachForMulticast(androidMessage),
-        admin.messaging().sendEachForMulticast(iosMessage),
-      ]);
+      const response = await admin.messaging().sendEachForMulticast(message);
+      console.log(
+        `✅ [NotificationService] Call push result: ${response.successCount} success, ${response.failureCount} failed`,
+      );
 
-      const aOk = androidResult.status === "fulfilled" ? androidResult.value.successCount : 0;
-      const iOk = iosResult.status    === "fulfilled" ? iosResult.value.successCount    : 0;
-      console.log(`✅ [NotificationService] Call push: Android ${aOk} ok | iOS ${iOk} ok`);
-
-      if (androidResult.status === "rejected") {
-        console.error("❌ [NotificationService] Android push error:", androidResult.reason);
-      }
-      if (iosResult.status === "rejected") {
-        console.error("❌ [NotificationService] iOS push error:", iosResult.reason);
+      // Automatically remove invalid / stale iOS tokens
+      if (response.failureCount > 0) {
+        const staleTokens: string[] = [];
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success && user.fcmTokens) {
+            const code = resp.error?.code;
+            if (
+              code === "messaging/invalid-registration-token" ||
+              code === "messaging/registration-token-not-registered"
+            ) {
+              staleTokens.push(user.fcmTokens[idx]);
+            }
+          }
+        });
+        if (staleTokens.length > 0) {
+          await User.findByIdAndUpdate(userId, { $pull: { fcmTokens: { $in: staleTokens } } });
+          console.log(`🧹 Removed ${staleTokens.length} stale FCM token(s) for user ${userId}`);
+        }
       }
     } catch (error) {
       console.error("❌ [NotificationService] sendDataOnlyNotification error:", error);

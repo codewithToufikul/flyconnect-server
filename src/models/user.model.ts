@@ -37,6 +37,12 @@ const userSchema = new Schema(
       type: [String],
       default: [],
     },
+    // iOS PushKit VoIP token — used for guaranteed call delivery in background/killed state.
+    // Different from FCM token; registered via react-native-voip-push-notification.
+    voipToken: {
+      type: String,
+      default: null,
+    },
     verificationStatus: {
       type: Boolean,
       default: false,
