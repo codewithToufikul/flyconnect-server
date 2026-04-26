@@ -9,6 +9,7 @@ export interface IConversation extends Document {
   lastMessageAt?: Date;
   unreadCount: Map<string, number>;
   mutedBy: mongoose.Types.ObjectId[];
+  category: "normal" | "social_response";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +55,11 @@ const ConversationSchema: Schema = new Schema(
         default: [],
       },
     ],
+    category: {
+      type: String,
+      enum: ["normal", "social_response"],
+      default: "normal",
+    },
   },
   {
     timestamps: true,
