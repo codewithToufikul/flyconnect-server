@@ -107,8 +107,20 @@ export class SocketService {
             const { User } = await import("../models/user.model.js");
 
             const caller =
-              await User.findById(userId).select("name profileImage");
-            const receiver = await User.findById(receiverId);
+              await User.findById(userId).select("name profileImage blockedUsers");
+            const receiver = await User.findById(receiverId).select("blockedUsers");
+
+            // 1. Check if caller has blocked receiver
+            if (caller?.blockedUsers?.some((id: any) => id && receiverId && id.toString() === receiverId.toString())) {
+              socket.emit("call:error", { message: "You have blocked this user. Unblock them to make a call." });
+              return;
+            }
+
+            // 2. Check if receiver has blocked caller
+            if (receiver?.blockedUsers?.some((id: any) => id && userId && id.toString() === userId.toString())) {
+              socket.emit("call:error", { message: "You cannot call this user." });
+              return;
+            }
 
             // Create Call Session in DB
             const newCall = await CallModel.create({
@@ -417,6 +429,21 @@ export class SocketService {
           } = data;
 
           try {
+            // 0. Check if blocked
+            const { User } = await import("../models/user.model.js");
+            const sender = await User.findById(userId).select("blockedUsers");
+            const receiver = await User.findById(receiverId).select("blockedUsers");
+
+            if (sender?.blockedUsers?.some((id: any) => id.toString() === receiverId.toString())) {
+              socket.emit("error", { message: "You have blocked this user." });
+              return;
+            }
+
+            if (receiver?.blockedUsers?.some((id: any) => id.toString() === userId.toString())) {
+              socket.emit("error", { message: "You cannot send messages to this user." });
+              return;
+            }
+
             // 1. Save Message to Database
             const mongoose = (await import("mongoose")).default;
             const { default: MessageModel } =

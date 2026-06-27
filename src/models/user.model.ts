@@ -55,6 +55,11 @@ const userSchema = new Schema(
       type: Date,
       default: Date.now,
     },
+    blockedUsers: {
+      type: [Schema.Types.ObjectId],
+      ref: "User",
+      default: [],
+    },
     createdAt: {
       type: Date,
       default: Date.now,
