@@ -9,6 +9,7 @@ export interface IConversation extends Document {
   lastMessageAt?: Date;
   unreadCount: Map<string, number>;
   mutedBy: mongoose.Types.ObjectId[];
+  deletedFor: mongoose.Types.ObjectId[];
   category: "normal" | "social_response";
   createdAt: Date;
   updatedAt: Date;
@@ -49,6 +50,13 @@ const ConversationSchema: Schema = new Schema(
       default: new Map(),
     },
     mutedBy: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+        default: [],
+      },
+    ],
+    deletedFor: [
       {
         type: Schema.Types.ObjectId,
         ref: "User",

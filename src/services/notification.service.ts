@@ -215,8 +215,8 @@ export class NotificationService {
         // ── Android: data-only wake (no system banner; Notifee handles UI) ──
         android: {
           priority: "high",
-          ttl: 45 * 1000,                                          // matches ghost-call window
-          collapseKey: data.callId ? `call_${data.callId}` : undefined,
+          ttl: 45 * 1000,
+          ...(data.callId ? { collapseKey: "call_" + data.callId } : {}),
         },
 
         // ── iOS: contentAvailable (background handler) + alert (killed banner) ──
@@ -227,7 +227,7 @@ export class NotificationService {
               // to handle the incoming call data without showing a standard banner.
               // The VoIP push handles the actual CallKit UI.
               contentAvailable: true,
-              sound: isIncomingCall ? "default" : undefined,
+              ...(isIncomingCall ? { sound: "default" } : {}),
               badge: 0,
             },
           },
@@ -258,7 +258,7 @@ export class NotificationService {
               code === "messaging/invalid-registration-token" ||
               code === "messaging/registration-token-not-registered"
             ) {
-              staleTokens.push(user.fcmTokens[idx]);
+              if (user.fcmTokens[idx]) staleTokens.push(user.fcmTokens[idx] as string);
             }
           }
         });

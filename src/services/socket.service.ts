@@ -434,12 +434,12 @@ export class SocketService {
             const sender = await User.findById(userId).select("blockedUsers");
             const receiver = await User.findById(receiverId).select("blockedUsers");
 
-            if (sender?.blockedUsers?.some((id: any) => id.toString() === receiverId.toString())) {
+            if (sender?.blockedUsers?.some((id: any) => id && receiverId && id.toString() === receiverId.toString())) {
               socket.emit("error", { message: "You have blocked this user." });
               return;
             }
 
-            if (receiver?.blockedUsers?.some((id: any) => id.toString() === userId.toString())) {
+            if (receiver?.blockedUsers?.some((id: any) => id && userId && id.toString() === userId.toString())) {
               socket.emit("error", { message: "You cannot send messages to this user." });
               return;
             }
@@ -499,7 +499,7 @@ export class SocketService {
               const conversation =
                 await ConversationModel.findById(conversationId);
               const isMuted = conversation?.mutedBy?.some(
-                (id: any) => id.toString() === receiverId.toString(),
+                (id: any) => id && receiverId && id.toString() === receiverId.toString(),
               );
 
               if (!isMuted) {
@@ -659,7 +659,7 @@ export class SocketService {
               const reactions = message.reactions || [];
               // Find any existing reaction from this user
               const existingUserReactionIndex = reactions.findIndex(
-                (r: any) => r.userId.toString() === userId,
+                (r: any) => r && r.userId && userId && r.userId.toString() === userId.toString(),
               );
 
               if (existingUserReactionIndex > -1) {

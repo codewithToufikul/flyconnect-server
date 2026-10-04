@@ -73,7 +73,7 @@ router.get(
  */
 router.get("/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     if (!id || typeof id !== "string" || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -124,7 +124,7 @@ router.post(
   authMiddleware,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const currentUserId = req.user?.id;
 
       if (!id || !mongoose.Types.ObjectId.isValid(id)) {
@@ -165,7 +165,7 @@ router.post(
   authMiddleware,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
       const currentUserId = req.user?.id;
 
       if (!id || !mongoose.Types.ObjectId.isValid(id)) {

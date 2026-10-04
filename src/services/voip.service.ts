@@ -109,7 +109,7 @@ class VoIPServiceClass {
 
       // VoIP pushes use a special topic: <bundleId>.voip
       note.topic      = `${this.bundleId}.voip`;
-      note.pushType   = "voip";
+      (note as any).pushType = "voip";
       note.priority   = 10;          // max priority — Apple delivers immediately
       note.expiry     = Math.floor(Date.now() / 1000) + 35; // TTL: 35 s (matches server auto-MISSED timeout)
 
@@ -128,7 +128,7 @@ class VoIPServiceClass {
       const result = await this.provider.send(note, user.voipToken);
 
       if (result.failed.length > 0) {
-        const failure = result.failed[0];
+        const failure: any = result.failed[0];
         console.error(`❌ [VoIPService] Push failed for user ${userId}:`, {
           deviceToken: user.voipToken,
           error: failure.error,
